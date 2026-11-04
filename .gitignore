@@ -1,0 +1,24 @@
+# Build output
+/out/
+*.class
+*.jar
+
+# Generated javadoc
+/docs/api/
+
+# IntelliJ
+/.idea/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse / VS Code
+/.classpath
+/.project
+/.settings/
+/.vscode/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
