@@ -3,8 +3,8 @@ package backgammon.trivia;
 /**
  * How hard a question is, as reported by the Open Trivia Database.
  *
- * <p>Carried along for display next to the question. The game does not request
- * a particular difficulty, so a mix arrives.</p>
+ * <p>Shown next to each question, and choosable on the title screen to narrow
+ * which questions are requested.</p>
  */
 public enum Difficulty {
 

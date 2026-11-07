@@ -27,6 +27,10 @@ import java.util.Random;
  * {@link #fetchQuestions(int)} must be called from a background thread &mdash;
  * which is what {@link QuestionDeck} does.</p>
  *
+ * <p>An instance can be narrowed to one topic and one difficulty, because the
+ * API accepts only one of each per request. To mix several topics,
+ * {@link QuestionDeck} uses one instance per topic and difficulty chosen.</p>
+ *
  * <p>Thread safe: the pacing lock serialises requests.</p>
  */
 public final class OpenTriviaDatabase implements TriviaSource {
@@ -45,6 +49,15 @@ public final class OpenTriviaDatabase implements TriviaSource {
 
     /** Response code the API returns when a request succeeded. */
     private static final int CODE_SUCCESS = 0;
+
+    /** Response code the API returns when it has fewer questions than asked for. */
+    private static final int CODE_NO_RESULTS = 1;
+
+    /**
+     * Batch sizes to try, largest first, when a narrow topic and difficulty
+     * do not have enough questions for a full batch.
+     */
+    private static final int[] FALLBACK_AMOUNTS = {5, 1};
 
     /** HTTP status the API returns when requests arrive too quickly. */
     private static final int STATUS_TOO_MANY_REQUESTS = 429;
@@ -72,20 +85,31 @@ public final class OpenTriviaDatabase implements TriviaSource {
     /** Randomness used to shuffle each question's answers. */
     private final Random shuffleSource;
 
-    /** Creates a client with its own HTTP client and unseeded randomness. */
+    /** The topic to ask for, or {@code null} for any topic. */
+    private final TriviaCategory category;
+
+    /** The difficulty to ask for, or {@code null} for any difficulty. */
+    private final Difficulty difficulty;
+
+    /** Creates a client for any topic and difficulty, with unseeded randomness. */
     public OpenTriviaDatabase() {
-        this(new Random());
+        this(new Random(), null, null);
     }
 
     /**
-     * Creates a client with a specific source of randomness.
+     * Creates a client narrowed to one topic and difficulty.
      *
      * @param shuffleSource randomness for shuffling each question's answers;
      *                      pass a seeded {@code Random} to make a test
      *                      deterministic
+     * @param category      the topic to ask for, or {@code null} for any
+     * @param difficulty    the difficulty to ask for, or {@code null} for any
      */
-    public OpenTriviaDatabase(final Random shuffleSource) {
+    public OpenTriviaDatabase(final Random shuffleSource, final TriviaCategory category,
+                              final Difficulty difficulty) {
         this.shuffleSource = shuffleSource;
+        this.category = category;
+        this.difficulty = difficulty;
         this.client = HttpClient.newBuilder()
                 .connectTimeout(TIMEOUT)
                 // The API redirects http to https; following it keeps the
@@ -101,27 +125,43 @@ public final class OpenTriviaDatabase implements TriviaSource {
             throw new IllegalArgumentException("Amount must be positive: " + amount);
         }
         final int capped = Math.min(amount, MAX_BATCH_SIZE);
-        final String body = send(buildRequestUri(capped));
-        return readQuestions(body);
-    }
-
-    /** {@inheritDoc} */
-    @Override
-    public String getName() {
-        return "Open Trivia Database";
+        try {
+            return readQuestions(send(buildRequestUri(capped)));
+        } catch (final NotEnoughQuestionsException tooFew) {
+            // A narrow choice (say, hard Comics questions) may have fewer
+            // questions than a full batch. Ask for fewer before giving up.
+            for (final int smaller : FALLBACK_AMOUNTS) {
+                if (smaller >= capped) {
+                    continue;
+                }
+                try {
+                    return readQuestions(send(buildRequestUri(smaller)));
+                } catch (final NotEnoughQuestionsException stillTooFew) {
+                    // Try the next, smaller size.
+                }
+            }
+            throw tooFew;
+        }
     }
 
     /**
-     * Builds the request URI for a batch of the given size.
+     * Builds the request URI for one batch of this client's topic and difficulty.
      *
      * @param amount how many questions to ask for, already capped
      * @return the URI to request
      */
-    private static URI buildRequestUri(final int amount) {
-        return URI.create(ENDPOINT
-                + "?amount=" + amount
-                + "&type=multiple"
-                + "&encode=url3986");
+    private URI buildRequestUri(final int amount) {
+        final StringBuilder uri = new StringBuilder(ENDPOINT)
+                .append("?amount=").append(amount)
+                .append("&type=multiple")
+                .append("&encode=url3986");
+        if (category != null) {
+            uri.append("&category=").append(category.getApiId());
+        }
+        if (difficulty != null) {
+            uri.append("&difficulty=").append(difficulty.getApiValue());
+        }
+        return URI.create(uri.toString());
     }
 
     /**
@@ -201,6 +241,9 @@ public final class OpenTriviaDatabase implements TriviaSource {
 
         try {
             final int responseCode = root.field("response_code").asInt();
+            if (responseCode == CODE_NO_RESULTS) {
+                throw new NotEnoughQuestionsException();
+            }
             if (responseCode != CODE_SUCCESS) {
                 throw new TriviaException("Trivia API error: " + describeCode(responseCode));
             }
@@ -269,6 +312,21 @@ public final class OpenTriviaDatabase implements TriviaSource {
                 return "too many requests; the API allows one every five seconds";
             default:
                 return "unrecognised response code " + code;
+        }
+    }
+
+    /**
+     * Thrown when the API has fewer questions matching a request than were
+     * asked for, so the caller can retry with a smaller batch.
+     */
+    private static final class NotEnoughQuestionsException extends TriviaException {
+
+        /** Serialisation version; exceptions are serialisable. */
+        private static final long serialVersionUID = 1L;
+
+        /** Creates the exception with a message for the status line. */
+        NotEnoughQuestionsException() {
+            super("Trivia API error: " + describeCode(CODE_NO_RESULTS));
         }
     }
 }

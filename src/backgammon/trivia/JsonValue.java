@@ -12,14 +12,14 @@ import java.util.Map;
  * strings, numbers, booleans, and null.</p>
  *
  * <p>Accessors are deliberately strict. {@link #field(String)} and
- * {@link #element(int)} throw rather than return null when the document is not
+ * {@link #elements()} throw rather than return null when the document is not
  * shaped as expected, so a change in the API surfaces as one clear error at the
  * point of the mistake instead of a {@code NullPointerException} later.</p>
  */
 public final class JsonValue {
 
     /** The six kinds of value JSON can hold. */
-    public enum Kind {
+    private enum Kind {
         /** A {@code {"key": value}} mapping. */
         OBJECT,
         /** A {@code [value, value]} sequence. */
@@ -120,24 +120,6 @@ public final class JsonValue {
     }
 
     /**
-     * Returns which kind of value this node holds.
-     *
-     * @return this node's kind
-     */
-    public Kind getKind() {
-        return kind;
-    }
-
-    /**
-     * Returns whether this node is JSON {@code null}.
-     *
-     * @return {@code true} if this node is null
-     */
-    public boolean isNull() {
-        return kind == Kind.NULL;
-    }
-
-    /**
      * Returns the named field of this object.
      *
      * @param name the field name
@@ -154,35 +136,6 @@ public final class JsonValue {
             throw new IllegalArgumentException("No such JSON field: " + name);
         }
         return value;
-    }
-
-    /**
-     * Returns whether this object has the named field.
-     *
-     * @param name the field name
-     * @return {@code true} if the field is present
-     * @throws IllegalStateException if this node is not an object
-     */
-    public boolean hasField(final String name) {
-        require(Kind.OBJECT);
-        @SuppressWarnings("unchecked")
-        final Map<String, JsonValue> fields = (Map<String, JsonValue>) payload;
-        return fields.containsKey(name);
-    }
-
-    /**
-     * Returns one element of this array.
-     *
-     * @param index the zero-based position
-     * @return the element at {@code index}
-     * @throws IllegalStateException     if this node is not an array
-     * @throws IndexOutOfBoundsException if {@code index} is out of range
-     */
-    public JsonValue element(final int index) {
-        require(Kind.ARRAY);
-        @SuppressWarnings("unchecked")
-        final List<JsonValue> elements = (List<JsonValue>) payload;
-        return elements.get(index);
     }
 
     /**
@@ -218,17 +171,6 @@ public final class JsonValue {
     public int asInt() {
         require(Kind.NUMBER);
         return (int) (double) (Double) payload;
-    }
-
-    /**
-     * Returns this boolean's value.
-     *
-     * @return the boolean value
-     * @throws IllegalStateException if this node is not a boolean
-     */
-    public boolean asBoolean() {
-        require(Kind.BOOLEAN);
-        return (Boolean) payload;
     }
 
     /**

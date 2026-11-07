@@ -152,25 +152,6 @@ public final class TriviaQuestion {
         return answerIndex == correctIndex;
     }
 
-    /**
-     * Returns the correct answer, for revealing it once the contest is over.
-     *
-     * @return the text of the correct answer
-     */
-    public String getCorrectAnswer() {
-        return answers.get(correctIndex);
-    }
-
-    /**
-     * Returns the position of the correct answer, for highlighting it once the
-     * contest is over.
-     *
-     * @return the index of the correct answer
-     */
-    public int getCorrectIndex() {
-        return correctIndex;
-    }
-
     /** {@inheritDoc} */
     @Override
     public String toString() {

@@ -64,15 +64,6 @@ public final class TriviaContest {
     }
 
     /**
-     * Returns whether the contest has been decided.
-     *
-     * @return {@code true} once an outcome exists
-     */
-    public boolean isResolved() {
-        return result != null;
-    }
-
-    /**
      * Submits one player's answer.
      *
      * <p>The first call decides the contest. Later calls change nothing and
@@ -117,8 +108,8 @@ public final class TriviaContest {
             return result;
         }
         final PlayerColor drawn = drawSource.nextBoolean()
-                ? PlayerColor.LIGHT
-                : PlayerColor.DARK;
+                ? PlayerColor.WHITE
+                : PlayerColor.BLACK;
         result = new ContestResult(drawn, ContestResult.Reason.NO_ANSWER_IN_TIME);
         return result;
     }

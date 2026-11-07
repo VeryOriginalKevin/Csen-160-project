@@ -67,24 +67,6 @@ public final class ContestResult {
         return reason;
     }
 
-    /**
-     * Describes the outcome for the status line.
-     *
-     * @return a sentence naming the winner and how it won
-     */
-    public String describe() {
-        switch (reason) {
-            case ANSWERED_CORRECTLY:
-                return winner + " answered correctly and moves first.";
-            case OPPONENT_ANSWERED_INCORRECTLY:
-                return getLoser() + " answered incorrectly, so " + winner + " moves first.";
-            case NO_ANSWER_IN_TIME:
-                return "Nobody answered in time. " + winner + " moves first by draw.";
-            default:
-                throw new AssertionError("Unhandled reason: " + reason);
-        }
-    }
-
     /** {@inheritDoc} */
     @Override
     public String toString() {

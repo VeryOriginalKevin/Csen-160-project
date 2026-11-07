@@ -1,93 +1,73 @@
 # Handover
 
-Last updated 2026-11-04. Read `README.md` for the game rules and
+Last updated 2026-11-07. Read `CLAUDE.md` for the game rules and
 `docs/ARCHITECTURE.md` for how the code is organised; this file is just the
 state of play.
 
 ## Getting it running
 
+No build tool, no scripts: plain `javac` and `java` from the project root.
+
 ```
-tools/build.ps1     compile src/ to out/classes
-tools/run.ps1       build, then run backgammon.Main
-tools/test.ps1      build, compile test/, run the checks
-tools/javadoc.ps1   generate docs/api
+# compile and run the game
+javac -d out src/backgammon/*.java src/backgammon/app/*.java src/backgammon/model/*.java src/backgammon/trivia/*.java src/backgammon/ui/*.java
+java -cp out backgammon.Main
+
+# compile and run the checks (-sourcepath pulls in the src classes they use)
+javac -d out -sourcepath src test/backgammon/model/*.java test/backgammon/app/*.java test/backgammon/trivia/*.java
+java -cp out backgammon.model.ModelChecks
+java -cp out backgammon.app.ControllerChecks
+java -cp out backgammon.trivia.TriviaChecks
 ```
 
-Java 17, Swing, no external dependencies. There is no Maven or Gradle, on
-purpose — the scripts call `javac` directly.
-
-One gotcha: the `java` on PATH on the original dev machine is a 1.8 JRE with no
-compiler, and it cannot run classes compiled for 17. The scripts therefore look
-a JDK up themselves (`tools/Jdk.ps1`): `JAVA_HOME` first, then `~/.jdks`, then
-IntelliJ's bundled runtime. Set `JAVA_HOME` to a JDK 17+ install and everything
-works regardless.
+Swing and the JDK's `java.net.http` only; no external dependencies. Compiles
+clean under `-Xlint:all` on JDK 15. `out/` is git-ignored.
 
 ## What is done
 
-**The trivia half is finished and tested.** 11 classes in
-`src/backgammon/trivia/`: a hand-written JSON reader, the live opentdb.com
-client, 16 bundled offline questions, the background question buffer, and the
-two-player contest that decides who moves first.
+**The whole game is playable end to end.** Trivia contest (keys 1-4 vs 7-0,
+15 s countdown), answer reveal, dice draft by mouse, both players' movement
+with full backgammon rules (hitting, bar entry, bearing off, doubles = four
+moves), automatic turn end when blocked, game over banner. A title screen
+lets players pick any mix of trivia topics and difficulties, or Random for
+either; New game returns to it.
 
-`tools/test.ps1` runs 78 checks over that package and passes, including a live
-fetch. Everything compiles clean under `-Xlint:all` and the javadoc generates
-without warnings.
-
-## What is not done
-
-**Nothing is committed yet.** The whole tree is still untracked.
-
-**The board model is empty.** `src/backgammon/model/` holds only `PlayerColor`
-and `Die`. Still needed: the board and its 24 points, the bar and trays,
-checkers, the four-die roll and the draft of two, move legality, hitting and
-entering from the bar, and bearing off.
-
-**There is no UI at all.** `src/backgammon/ui/` holds only `Theme`, which is the
-palette and fonts every graphic will be drawn from. `Main` prints a line and
-exits; it does not open a window.
-
-**`src/backgammon/app/` holds only `TurnPhase`**, the five-phase turn enum. The
-controller that drives those phases does not exist, so nothing connects the
-model to the UI yet.
+Checks: `ModelChecks` 50, `ControllerChecks` 69 (including 20 complete random
+games), `TriviaChecks` 89. All pass.
 
 ## Decisions already made
 
-- **No image files.** The board's points are triangles, checkers are circles,
-  dice are rounded rectangles with pips — all drawn with Java2D from `Theme`.
-  Resolution-independent, no binary assets in git, retuning the look is a
-  one-file edit.
-- **Batches of 20 questions, fetched in the background.** The API allows one
-  request per IP every five seconds, so the pacing clock in
-  `OpenTriviaDatabase` is `static` — per address, not per object. Getting this
-  wrong produced an HTTP 429 during testing.
-- **Multiple-choice questions only** (`type=multiple`), so every question has
-  exactly four answers and each player's panel always needs four buttons.
-- **Checks are plain `main` methods, not JUnit**, to keep the no-dependency
-  promise. Swapping in JUnit means jars in a `lib/` and a classpath change in
-  `tools/build.ps1` and `tools/test.ps1`.
+- **Input.** Trivia: White keys 1-4, Black keys 7-0, both
+  on the keyboard so the race is fair. Everything else is the mouse, used by
+  whichever single player is in control.
+- **Relaxed move obligation.** Any legal move in any order; no rule forcing
+  both dice to be used. Bar checkers must enter first. A turn ends when the
+  dice are spent or nothing legal remains.
+- **Doubles.** A drafted matching pair gives four moves.
+- **No answer in 15 s.** The winner is drawn at random.
+- **Players are White and Black,** matching their checkers.
+- **Trivia choices.** The API takes one topic and one difficulty per request,
+  so the deck keeps one supply per chosen combination and draws each question
+  from a random stocked supply. Supplies fill 5 s apart (the API's rate
+  limit), so with several topics the first round or two may come from the
+  first topic fetched. If a narrow choice has too few questions, smaller
+  batches are tried; a combination that fails 3 times is dropped.
+- **Start waits for live questions** (a "Fetching questions..." screen, up to
+  10 s), so the first question follows the players' choice.
+- **Dependency direction.** `model <- trivia <- app <- ui <- Main`. `ui` reads
+  model objects to draw them but changes state only through `GameController`.
+- **No image files.** Everything is drawn with Java2D from `Theme`.
+- **Checks are plain `main` methods, not JUnit,** to keep the no-dependency
+  promise.
 
-## Open questions
+## Open questions / possible next steps
 
-- **Nobody answers the question.** The README does not cover this, and the turn
-  has to start somehow, so `TriviaContest.resolveByTimeout` draws the winner at
-  random. Reasonable alternatives: whoever lost the previous contest, or whoever
-  is behind on the board. Worth confirming with the team.
-- **There is no time limit on a question.** `resolveByTimeout` exists but nothing
-  calls it, because no duration was ever specified. A countdown needs one.
-- **Doubling cube.** Not mentioned in the README and not built. Presumably out of
-  scope, since the dice draft already replaces the usual turn order.
-
-## Where to start
-
-The trivia package is ready to put on screen, so either direction works:
-
-1. **The board model** — `Board`, `Move`, and legality checking in
-   `src/backgammon/model/`. Pure logic, testable without a window, and
-   `tools/test.ps1` is already set up to run new check classes (register them in
-   the `$checkClasses` list).
-2. **The trivia panel** — a Swing panel showing a `TriviaQuestion` with two sets
-   of four buttons, calling `TriviaContest.submitAnswer`. This makes something
-   visible and exercises the finished half.
-
-Doing the model first is the safer order: the UI needs something to render, and
-the model is where the rules risk hides.
+- **Doubling cube and gammons.** Not built; the game ends with a simple win.
+- **Offline play uses 16 bundled questions.** They are only used with no
+  internet. They never repeat until all eligible ones have been shown (memory
+  lasts across New game), but they cover few topics, so offline play may not
+  follow the chosen topics, and a long offline session will cycle. Adding more
+  to `OfflineTriviaSource` is the fix if that matters.
+- **No sound or animation.** Checkers jump rather than slide.
+- **A move needs two clicks even when only one destination exists.** A
+  one-click shortcut would be a small change in `GameController.clickLocation`.

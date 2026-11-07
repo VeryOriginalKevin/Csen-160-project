@@ -7,3 +7,5 @@ The project will have one 1 application which displays the visual interface for 
 Maintain good object oriented principles and indent, source comment, and javadoc comment all code.
 
 trivia api: https://opentdb.com
+
+Dont assume the current dev machine (its JDK, PATH, tools) is the final environment; stick to plain java/javac.

@@ -27,10 +27,4 @@ public interface TriviaSource {
      */
     List<TriviaQuestion> fetchQuestions(int amount) throws TriviaException;
 
-    /**
-     * Returns a short name for this source, for status text and log messages.
-     *
-     * @return a human-readable name
-     */
-    String getName();
 }

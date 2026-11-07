@@ -2,11 +2,19 @@ package backgammon.trivia;
 
 import backgammon.model.PlayerColor;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 
 /**
- * Checks for the trivia package, runnable with {@code tools/test.ps1}.
+ * Checks for the trivia package. From the project root:
+ * <pre>
+ * javac -d out -sourcepath src test/backgammon/trivia/*.java
+ * java -cp out backgammon.trivia.TriviaChecks
+ * </pre>
  *
  * <p>Hand-rolled rather than written against JUnit, so the project keeps its
  * promise of no external dependencies and the checks can be run with nothing but
@@ -52,8 +60,11 @@ public final class TriviaChecks {
         checks.checkQuestionInvariants();
         checks.checkOfflineSource();
         checks.checkContestRules();
+        checks.checkSettings();
         checks.checkLiveApi();
+        checks.checkLiveApiWithSettings();
         checks.checkDeck();
+        checks.checkDeckMixesTopics();
         checks.report();
     }
 
@@ -91,16 +102,13 @@ public final class TriviaChecks {
 
         check("reads a top-level number", root.field("response_code").asInt() == 0);
 
-        final JsonValue entry = root.field("results").element(0);
+        final JsonValue entry = root.field("results").elements().get(0);
         check("resolves unicode and quote escapes",
                 entry.field("text").asString().equals("a&b \"quoted\""));
         check("reads a negative exponent number", entry.field("number").asInt() == -125);
-        check("reads a boolean", entry.field("flag").asBoolean());
-        check("reads null", entry.field("nothing").isNull());
+        // Booleans, null and an empty object must parse even though the game
+        // never reads them: a real response could contain any of them.
         check("reads an empty array", entry.field("emptyArray").elements().isEmpty());
-        check("reads an empty object",
-                entry.field("emptyObject").getKind() == JsonValue.Kind.OBJECT);
-        check("reports an absent field", !entry.hasField("absent"));
 
         check("rejects a request for an absent field",
                 throwsOnAccess(() -> root.field("absent")));
@@ -162,12 +170,11 @@ public final class TriviaChecks {
                 new Random(SEED));
 
         check("keeps every answer", question.getAnswerCount() == 4);
-        check("index and text agree on the correct answer",
-                question.getAnswers().get(question.getCorrectIndex())
-                        .equals(question.getCorrectAnswer()));
         check("marks exactly one answer correct", countCorrect(question) == 1);
+        check("the shuffled-in correct answer is the right one",
+                question.getAnswers().get(correctIndexOf(question)).equals("right"));
         check("does not leak the answer through toString",
-                !question.toString().contains(question.getCorrectAnswer()));
+                !question.toString().contains("right"));
 
         check("rejects an out-of-range answer index", throwsOnAccess(() -> {
             question.isCorrect(question.getAnswerCount());
@@ -214,6 +221,22 @@ public final class TriviaChecks {
         return correct;
     }
 
+    /**
+     * Finds the correct answer by asking the question about each position, the
+     * same way the game does.
+     *
+     * @param question the question to inspect
+     * @return the index of the first answer reported correct, or -1 if none is
+     */
+    private static int correctIndexOf(final TriviaQuestion question) {
+        for (int index = 0; index < question.getAnswerCount(); index++) {
+            if (question.isCorrect(index)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
     /** Checks the bundled source, including its behaviour past the pool size. */
     private void checkOfflineSource() {
         final OfflineTriviaSource source = new OfflineTriviaSource(new Random(SEED));
@@ -228,13 +251,23 @@ public final class TriviaChecks {
             check("every bundled question has a prompt", !question.getPrompt().isBlank());
         }
 
-        final int beyondPool = OfflineTriviaSource.getPoolSize() + 3;
+        // More than the bundled pool holds, to force repeats.
+        final int beyondPool = 100;
         check("serves more questions than the pool holds by repeating",
                 source.fetchQuestions(beyondPool).size() == beyondPool);
 
-        final String first = new OfflineTriviaSource(new Random(7)).fetchQuestions(5).toString();
-        final String second = new OfflineTriviaSource(new Random(7)).fetchQuestions(5).toString();
-        check("a seeded shuffle is reproducible", first.equals(second));
+        // A new game gets a new source, even one seeded identically, and must
+        // still not reopen with the questions the last game showed.
+        OfflineTriviaSource.forgetShown();
+        final Set<String> lastGame = new HashSet<>();
+        for (final TriviaQuestion question : new OfflineTriviaSource(new Random(7)).fetchQuestions(6)) {
+            lastGame.add(question.getPrompt());
+        }
+        check("no bundled question repeats within a game", lastGame.size() == 6);
+        for (final TriviaQuestion question : new OfflineTriviaSource(new Random(7)).fetchQuestions(6)) {
+            check("a new game does not repeat the last game's questions",
+                    !lastGame.contains(question.getPrompt()));
+        }
 
         check("rejects a non-positive amount", throwsOnAccess(() -> {
             source.fetchQuestions(0);
@@ -245,18 +278,17 @@ public final class TriviaChecks {
     private void checkContestRules() {
         final TriviaQuestion question =
                 new OfflineTriviaSource(new Random(1)).fetchQuestions(1).get(0);
-        final int correct = question.getCorrectIndex();
+        final int correct = correctIndexOf(question);
         final int incorrect = (correct + 1) % question.getAnswerCount();
 
         final TriviaContest answeredRight = new TriviaContest(question);
         check("a new contest accepts answers", answeredRight.isAcceptingAnswers());
-        check("a new contest is unresolved", !answeredRight.isResolved());
         check("a new contest has no result", answeredRight.getResult().isEmpty());
 
-        final ContestResult rightResult = answeredRight.submitAnswer(PlayerColor.LIGHT, correct);
+        final ContestResult rightResult = answeredRight.submitAnswer(PlayerColor.WHITE, correct);
         check("a correct answer wins the contest",
-                rightResult.getWinner() == PlayerColor.LIGHT);
-        check("the other side loses", rightResult.getLoser() == PlayerColor.DARK);
+                rightResult.getWinner() == PlayerColor.WHITE);
+        check("the other side loses", rightResult.getLoser() == PlayerColor.BLACK);
         check("the reason is a correct answer",
                 rightResult.getReason() == ContestResult.Reason.ANSWERED_CORRECTLY);
         check("a decided contest stops accepting answers",
@@ -266,23 +298,23 @@ public final class TriviaChecks {
 
         final TriviaContest answeredWrong = new TriviaContest(question);
         final ContestResult wrongResult =
-                answeredWrong.submitAnswer(PlayerColor.DARK, incorrect);
+                answeredWrong.submitAnswer(PlayerColor.BLACK, incorrect);
         check("an incorrect answer hands the contest to the opponent",
-                wrongResult.getWinner() == PlayerColor.LIGHT);
+                wrongResult.getWinner() == PlayerColor.WHITE);
         check("the reason is the opponent answering incorrectly",
                 wrongResult.getReason()
                         == ContestResult.Reason.OPPONENT_ANSWERED_INCORRECTLY);
 
-        final ContestResult latePress = answeredWrong.submitAnswer(PlayerColor.DARK, correct);
+        final ContestResult latePress = answeredWrong.submitAnswer(PlayerColor.BLACK, correct);
         check("a late answer cannot change the winner",
-                latePress.getWinner() == PlayerColor.LIGHT);
+                latePress.getWinner() == PlayerColor.WHITE);
         check("a late answer cannot change the reason",
                 latePress.getReason()
                         == ContestResult.Reason.OPPONENT_ANSWERED_INCORRECTLY);
 
         final TriviaContest unanswered = new TriviaContest(question);
         final ContestResult drawn = unanswered.resolveByTimeout(new Random(SEED));
-        check("a timeout decides the contest", unanswered.isResolved());
+        check("a timeout decides the contest", !unanswered.isAcceptingAnswers());
         check("the reason is that nobody answered",
                 drawn.getReason() == ContestResult.Reason.NO_ANSWER_IN_TIME);
         check("a timeout cannot override a decided contest",
@@ -290,11 +322,37 @@ public final class TriviaChecks {
                         == ContestResult.Reason.ANSWERED_CORRECTLY);
 
         check("an out-of-range answer index is rejected", throwsOnAccess(() -> {
-            new TriviaContest(question).submitAnswer(PlayerColor.LIGHT, 99);
+            new TriviaContest(question).submitAnswer(PlayerColor.WHITE, 99);
         }));
+    }
 
-        check("the outcome describes itself for the status line",
-                drawn.describe().contains("moves first"));
+    /** Checks the title screen's topic and difficulty choice, offline. */
+    private void checkSettings() {
+        final Random random = new Random(SEED);
+        check("any allows everything",
+                TriviaSettings.ANY.allows(TriviaCategory.ANIMALS, Difficulty.HARD));
+
+        final TriviaSettings geography = new TriviaSettings(
+                EnumSet.of(TriviaCategory.GEOGRAPHY), EnumSet.of(Difficulty.EASY));
+        check("a choice allows a match",
+                geography.allows(TriviaCategory.GEOGRAPHY, Difficulty.EASY));
+        check("a choice rejects another topic",
+                !geography.allows(TriviaCategory.HISTORY, Difficulty.EASY));
+        check("a choice rejects another difficulty",
+                !geography.allows(TriviaCategory.GEOGRAPHY, Difficulty.HARD));
+
+        // Bundled questions honour the choice where they can...
+        for (final TriviaQuestion question
+                : new OfflineTriviaSource(random, geography).fetchQuestions(5)) {
+            check("bundled questions follow the choice",
+                    question.getCategory().equals(TriviaCategory.GEOGRAPHY.getDisplayName())
+                            && question.getDifficulty() == Difficulty.EASY);
+        }
+        // ...and fall back to the whole pool when nothing bundled matches.
+        final TriviaSettings unmatched = new TriviaSettings(
+                EnumSet.of(TriviaCategory.ANIME_MANGA), EnumSet.noneOf(Difficulty.class));
+        check("an unmatched choice still yields questions",
+                new OfflineTriviaSource(random, unmatched).fetchQuestions(3).size() == 3);
     }
 
     /** Checks a live fetch, skipping if the API cannot be reached. */
@@ -316,13 +374,29 @@ public final class TriviaChecks {
         }
     }
 
+    /** Checks a live fetch narrowed to one topic and difficulty, skipping if offline. */
+    private void checkLiveApiWithSettings() {
+        try {
+            final List<TriviaQuestion> batch = new OpenTriviaDatabase(new Random(SEED),
+                    TriviaCategory.SCIENCE_NATURE, Difficulty.EASY).fetchQuestions(3);
+            for (final TriviaQuestion question : batch) {
+                check("a narrowed live question has the chosen difficulty",
+                        question.getDifficulty() == Difficulty.EASY);
+                check("a narrowed live question has the chosen topic",
+                        question.getCategory().contains("Nature"));
+            }
+        } catch (final TriviaException unreachable) {
+            System.out.println("SKIPPED narrowed live API: " + unreachable.getMessage());
+        }
+    }
+
     /**
      * Checks that the deck always yields a question, and buffers live ones.
      *
      * @throws InterruptedException if the wait for a refill is interrupted
      */
     private void checkDeck() throws InterruptedException {
-        final QuestionDeck deck = QuestionDeck.createDefault();
+        final QuestionDeck deck = QuestionDeck.createDefault(TriviaSettings.ANY);
         try {
             // Before any fetch has returned, the deck must still serve a question.
             check("the deck serves a question before any fetch returns",
@@ -335,19 +409,66 @@ public final class TriviaChecks {
             }
 
             if (deck.getBufferedCount() > 0) {
-                check("a successful refill marks the live source reachable",
-                        deck.isPrimaryReachable());
                 final int before = deck.getBufferedCount();
                 check("the deck serves a buffered question", deck.next() != null);
                 check("serving a question drains the buffer",
                         deck.getBufferedCount() < before);
             } else {
-                System.out.println("SKIPPED live refill: " + deck.getLastFailure());
+                System.out.println("SKIPPED live refill: no live questions arrived in time");
             }
         } finally {
             deck.shutdown();
         }
         check("the deck still serves a question after shutdown",
-                QuestionDeck.createDefault().next() != null);
+                QuestionDeck.createDefault(TriviaSettings.ANY).next() != null);
+    }
+
+    /**
+     * Checks that a deck with several supplies mixes them question by question,
+     * rather than serving one topic's batch and then the next. Uses stand-in
+     * sources, so it needs no network.
+     *
+     * @throws InterruptedException if the wait for the supplies is interrupted
+     */
+    private void checkDeckMixesTopics() throws InterruptedException {
+        final QuestionDeck deck = new QuestionDeck(
+                List.of(stubSource("Topic A"), stubSource("Topic B")),
+                new OfflineTriviaSource(new Random(SEED)));
+        try {
+            deck.start();
+            final long deadline = System.currentTimeMillis() + REFILL_TIMEOUT_MILLIS;
+            while (deck.getBufferedCount() < 20 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20L);
+            }
+            check("both supplies fill", deck.getBufferedCount() >= 20);
+
+            // With two full supplies of ten, a deck that served one batch at a
+            // time would give ten of one topic first. A mixing deck almost
+            // certainly shows both within the first ten.
+            final Set<String> firstTen = new HashSet<>();
+            for (int i = 0; i < 10; i++) {
+                firstTen.add(deck.next().getCategory());
+            }
+            check("the first ten questions mix both topics", firstTen.size() == 2);
+        } finally {
+            deck.shutdown();
+        }
+    }
+
+    /**
+     * Builds a stand-in live source that instantly returns questions of one topic.
+     *
+     * @param topic the category every question will report
+     * @return the source
+     */
+    private static TriviaSource stubSource(final String topic) {
+        return amount -> {
+            final List<TriviaQuestion> batch = new ArrayList<>();
+            for (int i = 0; i < amount; i++) {
+                batch.add(TriviaQuestion.of(topic, Difficulty.EASY, topic + " question " + i,
+                        "right", List.of("a", "b", "c"), new Random(i)));
+            }
+            return batch;
+        };
     }
 }

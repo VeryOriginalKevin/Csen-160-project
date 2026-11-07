@@ -1,9 +1,11 @@
 /**
- * Application wiring and turn orchestration.
+ * Turn orchestration: the controller that sequences a round.
  *
- * <p>This package owns the state machine that sequences a turn through its
- * phases &mdash; trivia contest, dice draft, then each player's movement &mdash;
- * and connects {@link backgammon.model} to {@link backgammon.ui}. It is the only
- * package that depends on both.</p>
+ * <p>{@link backgammon.app.GameController} owns the state machine that walks
+ * each round through its {@link backgammon.app.TurnPhase phases} &mdash; trivia
+ * contest, dice draft, then each player's movement &mdash; and decides which
+ * input is accepted when. It depends on {@link backgammon.model} and
+ * {@link backgammon.trivia}; the views in {@link backgammon.ui} call into it and
+ * listen to it, but it never refers to them.</p>
  */
 package backgammon.app;
