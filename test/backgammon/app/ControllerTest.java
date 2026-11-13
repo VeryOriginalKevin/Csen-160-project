@@ -4,6 +4,8 @@ import backgammon.model.PlayerColor;
 import backgammon.trivia.ContestResult;
 import backgammon.trivia.Difficulty;
 import backgammon.trivia.TriviaQuestion;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,20 +13,20 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 /**
- * Checks for the controller's phase sequence and input handling. From the
- * project root:
- * <pre>
- * javac -d out -sourcepath src test/backgammon/app/*.java
- * java -cp out backgammon.app.ControllerChecks
- * </pre>
+ * JUnit tests for the controller's phase sequence and input handling.
  *
- * <p>Uses a {@link ManualScheduler}, so timers fire only when a check advances
+ * <p>Uses a {@link ManualScheduler}, so timers fire only when a test advances
  * time, and a fixed question whose first answer is always correct. The final
- * check plays whole games with random answers and moves, to show the controller
+ * test plays whole games with random answers and moves, to show the controller
  * reaches the end of a game without getting stuck or throwing.</p>
  */
-public final class ControllerChecks {
+public class ControllerTest {
 
     /** Index of the right answer in {@link #QUESTION}. */
     private static final int RIGHT = 0;
@@ -36,157 +38,138 @@ public final class ControllerChecks {
     private static final TriviaQuestion QUESTION = new TriviaQuestion("Test", Difficulty.EASY,
             "Which is right?", Arrays.asList("right", "wrong", "wrong too", "also wrong"), RIGHT);
 
-    /** How many checks have run. */
-    private int checksRun;
-
-    /** How many checks have failed. */
-    private int checksFailed;
-
-    /** Not instantiated from outside; {@link #main} makes the one instance. */
-    private ControllerChecks() {
-        this.checksRun = 0;
-        this.checksFailed = 0;
-    }
-
-    /**
-     * Runs every check and reports the tally.
-     *
-     * @param args ignored
-     */
-    public static void main(final String[] args) {
-        final ControllerChecks checks = new ControllerChecks();
-        checks.checkCorrectAnswerWins();
-        checks.checkWrongAnswerLoses();
-        checks.checkTimeout();
-        checks.checkDraft();
-        checks.checkMovementClicks();
-        checks.checkNewGameDiscardsTimers();
-        checks.checkWholeGames();
-        checks.report();
-    }
-
     /** A correct answer wins the contest, and later answers change nothing. */
-    private void checkCorrectAnswerWins() {
+    @Test
+    void correctAnswerWins() {
         final ManualScheduler clock = new ManualScheduler();
         final GameController game = newController(clock, 1);
-        check("a game opens on a question", game.getPhase() == TurnPhase.TRIVIA_CONTEST && game.isQuestionOpen());
-        check("nobody is in control during the question", game.getActivePlayer().isEmpty());
+        assertTrue(game.getPhase() == TurnPhase.TRIVIA_CONTEST && game.isQuestionOpen(),
+                "a game opens on a question");
+        assertTrue(game.getActivePlayer().isEmpty(), "nobody is in control during the question");
 
         game.answer(PlayerColor.BLACK, RIGHT);
-        check("question closes on the first answer", !game.isQuestionOpen());
-        check("right answer wins", winnerOf(game) == PlayerColor.BLACK);
+        assertFalse(game.isQuestionOpen(), "question closes on the first answer");
+        assertEquals(PlayerColor.BLACK, winnerOf(game), "right answer wins");
 
         game.answer(PlayerColor.WHITE, RIGHT);
-        check("a late answer changes nothing", winnerOf(game) == PlayerColor.BLACK);
-        check("draft waits for the reveal", game.getPhase() == TurnPhase.TRIVIA_CONTEST);
+        assertEquals(PlayerColor.BLACK, winnerOf(game), "a late answer changes nothing");
+        assertEquals(TurnPhase.TRIVIA_CONTEST, game.getPhase(), "draft waits for the reveal");
 
         clock.advance(GameController.REVEAL_MILLIS);
-        check("draft follows the reveal", game.getPhase() == TurnPhase.DICE_DRAFT);
-        check("winner is in control of the draft", game.getActivePlayer().orElse(null) == PlayerColor.BLACK);
+        assertEquals(TurnPhase.DICE_DRAFT, game.getPhase(), "draft follows the reveal");
+        assertEquals(PlayerColor.BLACK, game.getActivePlayer().orElse(null),
+                "winner is in control of the draft");
     }
 
     /** A wrong answer hands the contest to the other player. */
-    private void checkWrongAnswerLoses() {
+    @Test
+    void wrongAnswerLoses() {
         final GameController game = newController(new ManualScheduler(), 2);
         game.answer(PlayerColor.WHITE, WRONG);
-        check("wrong answer loses", winnerOf(game) == PlayerColor.BLACK);
-        check("the reason is recorded", game.getContestResult().get().getReason()
-                == ContestResult.Reason.OPPONENT_ANSWERED_INCORRECTLY);
-        check("the answer is remembered for the reveal",
-                game.getAnsweredIndex() == WRONG && game.getAnsweredBy().orElse(null) == PlayerColor.WHITE);
+        assertEquals(PlayerColor.BLACK, winnerOf(game), "wrong answer loses");
+        assertEquals(ContestResult.Reason.OPPONENT_ANSWERED_INCORRECTLY,
+                game.getContestResult().get().getReason(), "the reason is recorded");
+        assertTrue(game.getAnsweredIndex() == WRONG && game.getAnsweredBy().orElse(null) == PlayerColor.WHITE,
+                "the answer is remembered for the reveal");
     }
 
     /** With no answer, time runs out and a winner is drawn. */
-    private void checkTimeout() {
+    @Test
+    void timeout() {
         final ManualScheduler clock = new ManualScheduler();
         final GameController game = newController(clock, 3);
         clock.advance(GameController.CONTEST_MILLIS / 2);
-        check("countdown is half way", Math.abs(game.getTimeRemainingFraction() - 0.5) < 0.01);
-        check("question still open half way", game.isQuestionOpen());
+        assertTrue(Math.abs(game.getTimeRemainingFraction() - 0.5) < 0.01, "countdown is half way");
+        assertTrue(game.isQuestionOpen(), "question still open half way");
         clock.advance(GameController.CONTEST_MILLIS / 2);
-        check("question closes when time is up", !game.isQuestionOpen());
-        check("timeout decides by draw", game.getContestResult().get().getReason()
-                == ContestResult.Reason.NO_ANSWER_IN_TIME);
+        assertFalse(game.isQuestionOpen(), "question closes when time is up");
+        assertEquals(ContestResult.Reason.NO_ANSWER_IN_TIME, game.getContestResult().get().getReason(),
+                "timeout decides by draw");
     }
 
     /** Picking toggles, and a second pick completes the draft. */
-    private void checkDraft() {
+    @Test
+    void draft() {
         final ManualScheduler clock = new ManualScheduler();
         final GameController game = newController(clock, 4);
         game.pickDie(0);
-        check("picks are ignored during the question", game.getDraftPicks().isEmpty());
+        assertTrue(game.getDraftPicks().isEmpty(), "picks are ignored during the question");
 
         game.answer(PlayerColor.WHITE, RIGHT);
         clock.advance(GameController.REVEAL_MILLIS);
         game.pickDie(2);
         game.pickDie(2);
-        check("picking a die again puts it back", game.getDraftPicks().isEmpty());
+        assertTrue(game.getDraftPicks().isEmpty(), "picking a die again puts it back");
         game.pickDie(2);
         game.pickDie(0);
-        check("draft is complete after two picks", game.getDraft().isPresent());
-        check("draft gave the winner dice 0 and 2", game.getDraft().get().isWinnerDie(0)
-                && game.getDraft().get().isWinnerDie(2));
+        assertTrue(game.getDraft().isPresent(), "draft is complete after two picks");
+        assertTrue(game.getDraft().get().isWinnerDie(0) && game.getDraft().get().isWinnerDie(2),
+                "draft gave the winner dice 0 and 2");
         // The winner may have been blocked outright, in which case play moved on.
         final TurnPhase phase = game.getPhase();
-        check("winner moves next", phase == TurnPhase.WINNER_MOVEMENT || phase == TurnPhase.LOSER_MOVEMENT);
+        assertTrue(phase == TurnPhase.WINNER_MOVEMENT || phase == TurnPhase.LOSER_MOVEMENT, "winner moves next");
     }
 
     /** Clicks select a checker, then move it; the round then passes on. */
-    private void checkMovementClicks() {
+    @Test
+    void movementClicks() {
         final ManualScheduler clock = new ManualScheduler();
         final GameController game = newController(clock, 5);
         game.answer(PlayerColor.WHITE, RIGHT);
         clock.advance(GameController.REVEAL_MILLIS);
         game.pickDie(0);
         game.pickDie(1);
-        check("WHITE moves first", game.getActivePlayer().orElse(null) == PlayerColor.WHITE);
+        assertEquals(PlayerColor.WHITE, game.getActivePlayer().orElse(null), "WHITE moves first");
 
         // From the opening position WHITE can always move.
         final int source = game.getLegalSources().iterator().next();
         game.clickLocation(source);
-        check("click selects a movable checker", game.getSelectedSource().orElse(-99) == source);
-        check("a selection has targets", !game.getLegalTargets().isEmpty());
+        assertEquals(source, game.getSelectedSource().orElse(-99), "click selects a movable checker");
+        assertFalse(game.getLegalTargets().isEmpty(), "a selection has targets");
         game.clickLocation(source);
-        check("clicking it again deselects it", game.getSelectedSource().isEmpty());
+        assertTrue(game.getSelectedSource().isEmpty(), "clicking it again deselects it");
 
         final int before = game.getRemainingDice().size();
         game.clickLocation(source);
         game.clickLocation(game.getLegalTargets().iterator().next());
-        check("a move spends a die", game.getRemainingDice().size() == before - 1
-                || game.getPhase() != TurnPhase.WINNER_MOVEMENT);
+        assertTrue(game.getRemainingDice().size() == before - 1 || game.getPhase() != TurnPhase.WINNER_MOVEMENT,
+                "a move spends a die");
 
         // Finish both movement turns; the next round's question should follow.
         playUntilPhaseIs(game, clock, TurnPhase.TRIVIA_CONTEST, new Random(5));
-        check("next round opens on a question", game.getPhase() == TurnPhase.TRIVIA_CONTEST
-                || game.getPhase() == TurnPhase.GAME_OVER);
-        check("round counter advanced", game.getRoundNumber() == 2 || game.getPhase() == TurnPhase.GAME_OVER);
+        assertTrue(game.getPhase() == TurnPhase.TRIVIA_CONTEST || game.getPhase() == TurnPhase.GAME_OVER,
+                "next round opens on a question");
+        assertTrue(game.getRoundNumber() == 2 || game.getPhase() == TurnPhase.GAME_OVER, "round counter advanced");
     }
 
     /** Timers left over from an abandoned game do not touch the new one. */
-    private void checkNewGameDiscardsTimers() {
+    @Test
+    void newGameDiscardsTimers() {
         final ManualScheduler clock = new ManualScheduler();
         final GameController game = newController(clock, 6);
         game.answer(PlayerColor.WHITE, RIGHT);
         game.newGame();
         clock.advance(GameController.REVEAL_MILLIS);
-        check("old reveal timer does not start a draft", game.getPhase() == TurnPhase.TRIVIA_CONTEST);
-        check("new game's question is open", game.isQuestionOpen());
+        assertEquals(TurnPhase.TRIVIA_CONTEST, game.getPhase(), "old reveal timer does not start a draft");
+        assertTrue(game.isQuestionOpen(), "new game's question is open");
     }
 
-    /** Whole games with random play always finish. */
-    private void checkWholeGames() {
+    /** Whole games with random play always finish. Every seed is tried, and all failures reported together. */
+    @Test
+    void wholeGames() {
+        final List<Executable> seeds = new ArrayList<>();
         for (int seed = 10; seed < 30; seed++) {
-            final ManualScheduler clock = new ManualScheduler();
-            final GameController game = newController(clock, seed);
-            final Random player = new Random(seed);
-            try {
+            final int s = seed;
+            seeds.add(() -> {
+                final ManualScheduler clock = new ManualScheduler();
+                final GameController game = newController(clock, s);
+                final Random player = new Random(s);
                 playUntilPhaseIs(game, clock, TurnPhase.GAME_OVER, player);
-                check("game with seed " + seed + " ends", game.getPhase() == TurnPhase.GAME_OVER);
-                check("game with seed " + seed + " has a winner", game.getWinner().isPresent());
-            } catch (final RuntimeException failure) {
-                check("game with seed " + seed + " threw " + failure, false);
-            }
+                assertEquals(TurnPhase.GAME_OVER, game.getPhase(), "game with seed " + s + " ends");
+                assertTrue(game.getWinner().isPresent(), "game with seed " + s + " has a winner");
+            });
         }
+        assertAll(seeds);
     }
 
     // ------------------------------------------------------------------
@@ -297,27 +280,5 @@ public final class ControllerChecks {
      */
     private static int pick(final List<Integer> options, final Random random) {
         return options.get(random.nextInt(options.size()));
-    }
-
-    /**
-     * Records the outcome of one check, printing it only on failure.
-     *
-     * @param description what was being checked
-     * @param satisfied   whether the check passed
-     */
-    private void check(final String description, final boolean satisfied) {
-        checksRun++;
-        if (!satisfied) {
-            checksFailed++;
-            System.out.println("FAIL: " + description);
-        }
-    }
-
-    /** Prints the tally and exits non-zero if any check failed. */
-    private void report() {
-        System.out.println(checksRun + " checks, " + checksFailed + " failures");
-        if (checksFailed > 0) {
-            System.exit(1);
-        }
     }
 }
